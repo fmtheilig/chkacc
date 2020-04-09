@@ -18,7 +18,7 @@ chkacc - Check auth.log for successful and failed remote logon attempts
  -f - Check for failed logon attempts
  -s - Check for successful logons
  -g - Use geolocation database to identify source
- -e - Send output to email
+ -e - Email output to admin
  -a - Enable all options
 
 The first time the script is run it creates the directory /etc/chkacc, sets the access, and puts
