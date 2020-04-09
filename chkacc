@@ -6,12 +6,10 @@
 #
 # Arguments
 #  -f - Check for failed logon attempts
-#  -s - Check for successful logon attempts
-#  -e - Send output to email
+#  -s - Check for successful logons
 #  -g - Use geolocation database to identify source (geoip-bin, geoip-database)
-#
-# Mar 22 02:03:57 pitangent sshd[18513]: Failed password for pi from 192.168.1.106 port 58070 ssh2
-# Mar 23 02:24:35 pitangent sshd[21592]: Accepted password for pi from 192.168.1.106 port 41442 ssh2
+#  -e - Email output to admin
+#  -a - Enable all options
 
 VER="1.00"
 
@@ -21,7 +19,7 @@ usage()
    echo " -f - Check for failed logon attempts"
    echo " -s - Check for successful logons"
    echo " -g - Use geolocation database to identify source"
-   echo " -e - Send output to email"
+   echo " -e - Email output to admin"
    echo " -a - Enable all options"
    echo " -h - Display this text"
    echo
@@ -30,6 +28,7 @@ usage()
 chklocal()
 {
    if [ ${1:0:8} = "192.168." ] ; then
+#     grep $1 /etc/hosts | cut -f2
       echo " Local address"
    elif [ ${1:0:4} = "172." ] ; then
       if [ ${1:4:2} -ge 16 ] && [ ${1:4:2} -le 31 ] ; then
@@ -44,8 +43,8 @@ chklocal()
    fi
 }
 
-TOEMAIL="fmtheilig@gmail.com"
-FREMAIL="admin@theilig.net"
+TOEMAIL="you@mail.com"
+FREMAIL="server@email.net"
 # Change to how you want to identify your server
 SERVERNAME=$HOSTNAME
 
