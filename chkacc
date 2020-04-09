@@ -1,13 +1,13 @@
 #!/bin/bash
 # ChkAcc - Snoops through auth.log files to see who has logged in and who has failed trying
-# For best results, set RepeatedMsgReduction off in /etc/rsyslog.conf
+# For best results, set $RepeatedMsgReduction off in /etc/rsyslog.conf
 # Geolocation database needed for -g option
 #  apt install geoip-bin geoip-database
 #
 # Arguments
 #  -f - Check for failed logon attempts
 #  -s - Check for successful logons
-#  -g - Use geolocation database to identify source (geoip-bin, geoip-database)
+#  -g - Use geolocation database to identify source
 #  -e - Email output to admin
 #  -a - Enable all options
 
@@ -27,20 +27,26 @@ usage()
 
 chklocal()
 {
+   local o=""
+   local c=$(grep $1 /etc/hosts | cut -f2)
    if [ ${1:0:8} = "192.168." ] ; then
-#     grep $1 /etc/hosts | cut -f2
-      echo " Local address"
+      if [ -z "$c" ] ; then
+         o="Local address"
+      else
+         o=$c
+      fi
    elif [ ${1:0:4} = "172." ] ; then
       if [ ${1:4:2} -ge 16 ] && [ ${1:4:2} -le 31 ] ; then
-         echo " Local address"
+         o="Local address"
       else
-         geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null
+         o=$(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
       fi
    elif [ ${1:0:3} = "10." ] ; then
-      echo " Local address"
+      o="Local address"
    else
-      geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null
+      o=$(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
    fi
+   echo " "$o
 }
 
 TOEMAIL="you@mail.com"
