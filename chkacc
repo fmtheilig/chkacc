@@ -1,6 +1,6 @@
 #!/bin/bash
 # ChkAcc - Snoops through auth.log files to see who has logged in and who has failed trying
-# For best results, set $epeatedMsgReduction off in /etc/rsyslog.conf
+# For best results, set RepeatedMsgReduction off in /etc/rsyslog.conf
 # Geolocation database needed for -g option
 #  apt install geoip-bin geoip-database
 #
@@ -13,18 +13,41 @@
 # Mar 22 02:03:57 pitangent sshd[18513]: Failed password for pi from 192.168.1.106 port 58070 ssh2
 # Mar 23 02:24:35 pitangent sshd[21592]: Accepted password for pi from 192.168.1.106 port 41442 ssh2
 
+VER="1.00"
+
 usage()
 {
-   echo "chkacc - Check auth.log for successful and failed remote logon attempts"
+   echo "chkacc ${VER} - Check auth.log for successful and failed remote logon attempts"
    echo " -f - Check for failed logon attempts"
    echo " -s - Check for successful logons"
-   echo " -e - Send output to email"
    echo " -g - Use geolocation database to identify source"
+   echo " -e - Send output to email"
+   echo " -a - Enable all options"
+   echo " -h - Display this text"
    echo
+}
+
+chklocal()
+{
+   if [ ${1:0:8} = "192.168." ] ; then
+      echo " Local address"
+   elif [ ${1:0:4} = "172." ] ; then
+      if [ ${1:4:2} -ge 16 ] && [ ${1:4:2} -le 31 ] ; then
+         echo " Local address"
+      else
+         geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null
+      fi
+   elif [ ${1:0:3} = "10." ] ; then
+      echo " Local address"
+   else
+      geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null
+   fi
 }
 
 TOEMAIL="fmtheilig@gmail.com"
 FREMAIL="admin@theilig.net"
+# Change to how you want to identify your server
+SERVERNAME=$HOSTNAME
 
 FAIL=0
 SUCC=0
@@ -36,70 +59,71 @@ if [[ ! -d "/etc/chkacc" ]]; then
    sudo chmod 777 /etc/chkacc
    echo "s/for invalid user  from/for \[BLANK\] from/" > /etc/chkacc/filter.sed
    echo "s/for invalid user/for/" >> /etc/chkacc/filter.sed
-#   echo "s///" > /etc/chkacc/subst.sed
 fi
 
-if [ $# = 0 ] ; then
+if [ $# = 0 ]
+then
    usage
    exit 0
 fi
 
-while [ "$1" != "" ]; do
-   case $1 in
-      -f ) FAIL=1 ;;
-      -s ) SUCC=1 ;;
-      -g ) GEO=1 ;;
-      -e ) EMAIL=1 ;;
-      -\? ) usage ;;
-      *  ) echo "Invalid argument:" $1 ;;
+while getopts ":fsgeah" opt; do
+   case ${opt} in
+      f ) FAIL=1 ;;
+      s ) SUCC=1 ;;
+      g ) GEO=1 ;;
+      e ) EMAIL=1 ;;
+      a ) FAIL=1; SUCC=1; GEO=1; EMAIL=1 ;;
+      h ) usage ;;
+      * ) echo "Usage: chkacc [-fsgeah] - Invalid argument:" $OPTARG 1>&2 ;;
    esac
-   shift
 done
 
 if [ $FAIL = 1 ]; then
-   rm -f /etc/chkacc/failed.txt
    zgrep -h "Failed password" /var/log/auth.log.4.gz /var/log/auth.log.3.gz /var/log/auth.log.2.gz \
-     /var/log/auth.log.1 /var/log/auth.log | sed -f /etc/chkacc/filter.sed | tr -s ' ' | \
+     /var/log/auth.log.1 /var/log/auth.log 2> /dev/null | sed -f /etc/chkacc/filter.sed | tr -s ' ' | \
      cut -f1,2,3,9,11 -d ' ' > /etc/chkacc/failed.txt
-   if [ $EMAIL -eq 1 ]; then
-      cut -f4 -d ' ' /etc/chkacc/failed.txt | sort | uniq -c | sort -nr | \
-        mail -s "Failed attempts by account" -a "From: ${FREMAIL}" $TOEMAIL
-   else
-      echo "Failed attempts by account"
-      cut -f4 -d ' ' /etc/chkacc/failed.txt | sort | uniq -c | sort -nr
-   fi
+   echo "Failed attempts by account" > /etc/chkacc/outfile
+   cut -f4 -d ' ' /etc/chkacc/failed.txt | sort | uniq -c | sort -nr >> /etc/chkacc/outfile
+   echo >> /etc/chkacc/outfile
 
    if [ $GEO = 1 ]; then
-      if [ $EMAIL = 1 ]; then
-         cat /etc/chkacc/failed.txt | cut -f5 -d ' ' | sort | uniq -c | sort -nr | \
-         (
-            while read x; do
-               echo -n $x "-";
-               geoiplookup $x | sed 's/GeoIP Country Edition://';
-            done
-         ) | mail -s "Failed attempts by geolocation" -a "From: ${FREMAIL}" $TOEMAIL
-      else
-         echo "Failed attempts by geolocation"
-         cat /etc/chkacc/failed.txt | cut -f5 -d ' ' | sort | uniq -c | sort -nr | \
-         (
-            while read x; do
-               echo -n $x "-";
-               geoiplookup $x | sed 's/GeoIP Country Edition://';
-            done
-         )
-      fi
+      echo "Failed attempts by geolocation" >> /etc/chkacc/outfile
+      cut -f5 -d ' ' /etc/chkacc/failed.txt | sort | uniq | \
+      (
+         while read x; do
+            echo -n $x "-";
+            chklocal $x
+         done
+      ) >> /etc/chkacc/outfile
+      echo >> /etc/chkacc/outfile
    fi
 fi
 
 if [ $SUCC = 1 ]; then
-   rm -f /etc/chkacc/access.txt
    zgrep -h " Accepted" /var/log/auth.log.4.gz /var/log/auth.log.3.gz /var/log/auth.log.2.gz \
-     /var/log/auth.log.1 /var/log/auth.log | tr -s ' ' | cut -f1,2,3,9,11 -d ' ' > /etc/chkacc/access.txt
-   if [ $EMAIL = 1 ]; then
-      cut -f5 -d ' ' /etc/chkacc/access.txt | sort | uniq -c | sort -nr | \
-        mail -s "Successful logins" -a "From: ${FREMAIL}" $TOEMAIL
-   else
-      echo "Successful logins"
-      cut -f5 -d ' ' /etc/chkacc/access.txt | sort | uniq -c | sort -nr
+     /var/log/auth.log.1 /var/log/auth.log 2> /dev/null | tr -s ' ' | cut -f1,2,3,9,11 -d ' ' > /etc/chkacc/success.txt
+   echo "Successful logins" >> /etc/chkacc/outfile
+   cut -f5 -d ' ' /etc/chkacc/success.txt | sort | uniq -c | sort -nr >> /etc/chkacc/outfile
+ 
+   if [ $GEO = 1 ]; then
+      echo >> /etc/chkacc/outfile
+      echo "Successful logins by geolocation" >> /etc/chkacc/outfile
+      cat /etc/chkacc/success.txt | cut -f5 -d ' ' | sort | uniq | \
+      (
+         while read x; do
+            echo -n $x "-";
+            chklocal $x
+         done
+      ) >> /etc/chkacc/outfile
    fi
+fi
+
+if [ -f /etc/chkacc/outfile ]; then
+   if [ $EMAIL = 1 ]; then
+      cat /etc/chkacc/outfile | mail -s "chkacc report: ${SERVERNAME}" -a "From: ${FREMAIL}" $TOEMAIL
+   else
+      cat /etc/chkacc/outfile
+   fi
+   rm /etc/chkacc/outfile
 fi
