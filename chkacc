@@ -2,7 +2,9 @@
 # ChkAcc - Snoops through auth.log files to see who has logged in and who has failed trying
 # For best results, set $RepeatedMsgReduction off in /etc/rsyslog.conf
 # Geolocation database needed for -g option
-#  apt install geoip-bin geoip-database
+#   apt install geoip-bin geoip-database
+# Written by Fred Theilig (gmail->fmtheilig) for free and unrestricted use
+# Developed and tested under Ubuntu 18.04
 #
 # Arguments
 #  -f - Check for failed logon attempts
@@ -11,7 +13,7 @@
 #  -e - Email output to admin
 #  -a - Enable all options
 
-VER="1.00"
+VER="1.01"
 
 usage()
 {
@@ -25,40 +27,58 @@ usage()
    echo
 }
 
-chklocal()
+# chklocal function determines if the target IP address is a local address (class C) and
+# if the address appears in your /etc/hosts file. Output is the IP address, contents of
+# hosts if present, "Local address" if local, and result of GeoIPLookup if otherwise.
+function chklocal()
 {
-   local o=""
-   local c=$(grep $1 /etc/hosts | cut -f2)
+   local hname=$(grep $1 /etc/hosts | awk '{print $2}')
+   local INHOSTS=0
+   local ISLOCAL=0
+   if [ ! -z "$hname" ] ; then
+      INHOSTS=1
+   fi
+
    if [ ${1:0:8} = "192.168." ] ; then
-      if [ -z "$c" ] ; then
-         o="Local address"
-      else
-         o=$c
-      fi
+      ISLOCAL=1
    elif [ ${1:0:4} = "172." ] ; then
       if [ ${1:4:2} -ge 16 ] && [ ${1:4:2} -le 31 ] ; then
-         o="Local address"
-      else
-         o=$(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
+         ISLOCAL=1
       fi
    elif [ ${1:0:3} = "10." ] ; then
-      o="Local address"
-   else
-      o=$(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
+      ISLOCAL=1
    fi
-   echo " "$o
+
+   echo -n $1 "- "
+   if [ "$ISLOCAL" = 1 ] ; then
+      if [ "$INHOSTS" = 1 ] ; then
+         echo $hname
+      else
+         echo "Local address"
+      fi
+   else
+      if [ "$INHOSTS" = 1 ] ; then
+         echo $hname"-"$(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
+      else
+         echo $(geoiplookup $1 | sed 's/GeoIP Country Edition://' 2> /dev/null)
+      fi
+   fi
 }
 
+# Here begins the main program
+# Change your From and To email address for the email function to work
 TOEMAIL="you@mail.com"
-FREMAIL="server@email.net"
+FREMAIL="admin@mail.net"
 # Change to how you want to identify your server
 SERVERNAME=$HOSTNAME
 
+# Flag variables
 FAIL=0
 SUCC=0
 GEO=0
 EMAIL=0
 
+# Create and configure working directory if is does not exist
 if [[ ! -d "/etc/chkacc" ]]; then
    sudo mkdir /etc/chkacc
    sudo chmod 777 /etc/chkacc
@@ -66,12 +86,13 @@ if [[ ! -d "/etc/chkacc" ]]; then
    echo "s/for invalid user/for/" >> /etc/chkacc/filter.sed
 fi
 
-if [ $# = 0 ]
-then
+# Display usage information if no parameter given
+if [ $# = 0 ] ; then
    usage
    exit 0
 fi
 
+# Process command line options
 while getopts ":fsgeah" opt; do
    case ${opt} in
       f ) FAIL=1 ;;
@@ -84,6 +105,9 @@ while getopts ":fsgeah" opt; do
    esac
 done
 
+# failed.txt and success.txt files are generated based on grep parameters. They are left behind
+# for your curiosity. An 'outfile' is generated for display or email purposes.
+# First we process for failed attempts.
 if [ $FAIL = 1 ]; then
    zgrep -h "Failed password" /var/log/auth.log.4.gz /var/log/auth.log.3.gz /var/log/auth.log.2.gz \
      /var/log/auth.log.1 /var/log/auth.log 2> /dev/null | sed -f /etc/chkacc/filter.sed | tr -s ' ' | \
@@ -97,7 +121,6 @@ if [ $FAIL = 1 ]; then
       cut -f5 -d ' ' /etc/chkacc/failed.txt | sort | uniq | \
       (
          while read x; do
-            echo -n $x "-";
             chklocal $x
          done
       ) >> /etc/chkacc/outfile
@@ -105,6 +128,7 @@ if [ $FAIL = 1 ]; then
    fi
 fi
 
+# Now we process for successfull logins
 if [ $SUCC = 1 ]; then
    zgrep -h " Accepted" /var/log/auth.log.4.gz /var/log/auth.log.3.gz /var/log/auth.log.2.gz \
      /var/log/auth.log.1 /var/log/auth.log 2> /dev/null | tr -s ' ' | cut -f1,2,3,9,11 -d ' ' > /etc/chkacc/success.txt
@@ -114,16 +138,16 @@ if [ $SUCC = 1 ]; then
    if [ $GEO = 1 ]; then
       echo >> /etc/chkacc/outfile
       echo "Successful logins by geolocation" >> /etc/chkacc/outfile
-      cat /etc/chkacc/success.txt | cut -f5 -d ' ' | sort | uniq | \
+      cut -f5 -d ' ' /etc/chkacc/success.txt | sort | uniq | \
       (
          while read x; do
-            echo -n $x "-";
             chklocal $x
          done
       ) >> /etc/chkacc/outfile
    fi
 fi
 
+# Display or email the outfile
 if [ -f /etc/chkacc/outfile ]; then
    if [ $EMAIL = 1 ]; then
       cat /etc/chkacc/outfile | mail -s "chkacc report: ${SERVERNAME}" -a "From: ${FREMAIL}" $TOEMAIL
